@@ -1,14 +1,18 @@
 atv-siri-py
 Copyright 2026 Justin Jäger
 
-This project is a Python port/reimplementation inspired by:
-  appletv-siri-voice by Marcus Adolfsson
+This project is a Python port and reimplementation derived from ideas and
+protocol behavior in:
+
+  appletv-siri-voice
+  Copyright 2026 Marcus Adolfsson
   https://github.com/marcusadolfsson/appletv-siri-voice
+  Licensed under the Apache License, Version 2.0.
 
-HomeKit Target Control, HomeKit Data Stream framing/serialization, and Siri session
-behavior were implemented with reference to HAP-NodeJS by the Homebridge project,
-licensed under Apache License 2.0:
+HomeKit Target Control and HomeKit Data Stream behavior was also implemented
+with reference to HAP-NodeJS by the Homebridge project:
+
   https://github.com/homebridge/HAP-NodeJS
+  Licensed under the Apache License, Version 2.0.
 
-Runtime dependencies retain their respective licenses, including HAP-python,
-cryptography, aiohttp, opuslib-next, and libopus.
+Runtime dependencies and libopus retain their respective licenses.
