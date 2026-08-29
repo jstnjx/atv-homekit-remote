@@ -1,17 +1,31 @@
-"""Pure-Python Apple TV HomeKit Target Control + Siri voice library."""
 from __future__ import annotations
 
-from .constants import Button, ButtonState, TargetCategory
+from typing import TYPE_CHECKING, Any
 
-__version__ = "0.1.0"
-__all__ = ["AppleTVSiriRemote", "RemoteConfig", "SiriSession", "Button", "ButtonState", "TargetCategory"]
+from .constants import Button, ButtonState, HDSCloseReason, HDSStatus, TargetCategory, TargetOperation
+from .version import __version__
+
+if TYPE_CHECKING:
+    from .remote import AppleTVSiriRemote, ButtonConfiguration, RemoteConfig, TargetConfiguration
+
+__all__ = [
+    "AppleTVSiriRemote",
+    "Button",
+    "ButtonConfiguration",
+    "ButtonState",
+    "HDSCloseReason",
+    "HDSStatus",
+    "RemoteConfig",
+    "TargetCategory",
+    "TargetConfiguration",
+    "TargetOperation",
+    "__version__",
+]
 
 
-def __getattr__(name: str):
-    if name in {"AppleTVSiriRemote", "RemoteConfig"}:
-        from .remote import AppleTVSiriRemote, RemoteConfig
-        return {"AppleTVSiriRemote": AppleTVSiriRemote, "RemoteConfig": RemoteConfig}[name]
-    if name == "SiriSession":
-        from .audio import SiriSession
-        return SiriSession
+def __getattr__(name: str) -> Any:
+    if name in {"AppleTVSiriRemote", "ButtonConfiguration", "RemoteConfig", "TargetConfiguration"}:
+        from . import remote
+
+        return getattr(remote, name)
     raise AttributeError(name)
