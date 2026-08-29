@@ -4,7 +4,7 @@ import asyncio
 from dataclasses import dataclass
 import logging
 import os
-import random
+import secrets
 import struct
 from typing import Any, Awaitable, Callable
 
@@ -23,6 +23,8 @@ from .hds_codec import Int64, decode as hds_decode, encode as hds_encode
 
 _LOGGER = logging.getLogger(__name__)
 MAX_PAYLOAD_LENGTH = 0xFFFFF
+PREPARED_SESSION_TIMEOUT = 10.0
+MAX_PREPARED_SESSIONS = 16
 
 
 def _hkdf(shared_secret: bytes, salt: bytes, info: bytes) -> bytes:
@@ -30,7 +32,8 @@ def _hkdf(shared_secret: bytes, salt: bytes, info: bytes) -> bytes:
 
 
 def _nonce(counter: int) -> bytes:
-    # HAP-NodeJS creates an 8-byte LE counter and OpenSSL left-pads it to 12 bytes.
+    if not 0 <= counter <= 0xFFFFFFFFFFFFFFFF:
+        raise OverflowError("HDS nonce counter exhausted")
     return b"\x00" * 4 + struct.pack("<Q", counter)
 
 
@@ -43,6 +46,12 @@ class PreparedSession:
     timeout: asyncio.TimerHandle | None = None
 
 
+MessageHandler = Callable[
+    ["HDSConnection", str, str, dict[str, Any], int | None],
+    Awaitable[None] | None,
+]
+
+
 class HDSConnection:
     def __init__(
         self,
@@ -51,7 +60,7 @@ class HDSConnection:
         prepared: PreparedSession,
         first_payload: bytes,
         *,
-        on_message: Callable[["HDSConnection", str, str, dict[str, Any], int | None], Awaitable[None] | None],
+        on_message: MessageHandler,
         on_close: Callable[["HDSConnection"], None],
     ) -> None:
         self.reader = reader
@@ -61,12 +70,13 @@ class HDSConnection:
         self._out_key = prepared.accessory_to_controller_key
         self._in_key = prepared.controller_to_accessory_key
         self._out_nonce = 0
-        self._in_nonce = 1  # first frame was already decrypted during identification
+        self._in_nonce = 1
         self._first_payload = first_payload
         self._on_message = on_message
         self._on_close = on_close
         self._responses: dict[int, asyncio.Future[tuple[int, dict[str, Any]]]] = {}
         self._closed = False
+        self._send_lock = asyncio.Lock()
         self.target_identifier: int | None = None
         self._task: asyncio.Task[None] | None = None
 
@@ -75,7 +85,20 @@ class HDSConnection:
         return self._closed
 
     def start(self) -> None:
-        self._task = asyncio.create_task(self._run(), name=f"hds-{self.remote_address}")
+        if self._task is None:
+            self._task = asyncio.create_task(self._run(), name=f"hds-{self.remote_address}")
+
+    async def wait_closed(self) -> None:
+        task = self._task
+        if task and task is not asyncio.current_task():
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+        try:
+            await self.writer.wait_closed()
+        except (AttributeError, ConnectionError, OSError):
+            pass
 
     async def _run(self) -> None:
         try:
@@ -101,7 +124,7 @@ class HDSConnection:
         except asyncio.CancelledError:
             raise
         except Exception:
-            _LOGGER.exception("HDS connection failed for %s", self.remote_address)
+            _LOGGER.warning("HDS connection failed for %s", self.remote_address, exc_info=True)
         finally:
             self.close()
 
@@ -116,11 +139,17 @@ class HDSConnection:
         if not isinstance(header, dict) or not isinstance(message, dict):
             raise ValueError("HDS header/message must be dictionaries")
         protocol = str(header.get("protocol", ""))
+        if not protocol:
+            raise ValueError("HDS message is missing protocol")
         if "event" in header:
             return "event", protocol, str(header["event"]), message, None, None
         if "request" in header:
+            if "id" not in header:
+                raise ValueError("HDS request is missing id")
             return "request", protocol, str(header["request"]), message, int(header["id"]), None
         if "response" in header:
+            if "id" not in header or "status" not in header:
+                raise ValueError("HDS response is missing id/status")
             return "response", protocol, str(header["response"]), message, int(header["id"]), int(header["status"])
         raise ValueError(f"unknown HDS message header: {header!r}")
 
@@ -136,21 +165,22 @@ class HDSConnection:
             await result
 
     async def _send(self, header: dict[str, Any], message: dict[str, Any]) -> None:
-        if self._closed:
-            raise ConnectionError("HDS connection is closed")
-        header_data = hds_encode(header)
-        if len(header_data) > 255:
-            raise ValueError("HDS encoded header exceeds one-byte header-length field")
-        payload = bytes([len(header_data)]) + header_data + hds_encode(message)
-        if len(payload) > MAX_PAYLOAD_LENGTH:
-            raise ValueError("HDS payload too large")
-        frame_header = bytes([1]) + len(payload).to_bytes(3, "big")
-        encrypted = ChaCha20Poly1305(self._out_key).encrypt(
-            _nonce(self._out_nonce), payload, frame_header
-        )
-        self._out_nonce += 1
-        self.writer.write(frame_header + encrypted)
-        await self.writer.drain()
+        async with self._send_lock:
+            if self._closed:
+                raise ConnectionError("HDS connection is closed")
+            header_data = hds_encode(header)
+            if len(header_data) > 255:
+                raise ValueError("HDS encoded header exceeds one-byte header-length field")
+            payload = bytes([len(header_data)]) + header_data + hds_encode(message)
+            if len(payload) > MAX_PAYLOAD_LENGTH:
+                raise ValueError("HDS payload too large")
+            frame_header = bytes([1]) + len(payload).to_bytes(3, "big")
+            encrypted = ChaCha20Poly1305(self._out_key).encrypt(
+                _nonce(self._out_nonce), payload, frame_header
+            )
+            self._out_nonce += 1
+            self.writer.write(frame_header + encrypted)
+            await self.writer.drain()
 
     async def send_event(self, protocol: str, topic: str, message: dict[str, Any] | None = None) -> None:
         await self._send({"protocol": protocol, "event": topic}, message or {})
@@ -181,21 +211,25 @@ class HDSConnection:
         *,
         timeout: float = 10.0,
     ) -> tuple[int, dict[str, Any]]:
+        if timeout <= 0:
+            raise ValueError("timeout must be > 0")
         loop = asyncio.get_running_loop()
         while True:
-            request_id = random.getrandbits(32)
+            request_id = secrets.randbits(32)
             if request_id not in self._responses:
                 break
         future: asyncio.Future[tuple[int, dict[str, Any]]] = loop.create_future()
         self._responses[request_id] = future
-        await self._send(
-            {"protocol": protocol, "request": topic, "id": Int64(request_id)},
-            message or {},
-        )
         try:
+            await self._send(
+                {"protocol": protocol, "request": topic, "id": Int64(request_id)},
+                message or {},
+            )
             return await asyncio.wait_for(future, timeout)
         finally:
             self._responses.pop(request_id, None)
+            if not future.done():
+                future.cancel()
 
     def close(self) -> None:
         if self._closed:
@@ -209,7 +243,10 @@ class HDSConnection:
             self.writer.close()
         except Exception:
             pass
-        self._on_close(self)
+        try:
+            self._on_close(self)
+        except Exception:
+            _LOGGER.exception("HDS close callback failed")
 
 
 class HDSServer:
@@ -241,21 +278,25 @@ class HDSServer:
         self.server = await asyncio.start_server(self._accept, self.host, 0)
         sockets = self.server.sockets or []
         if not sockets:
+            self.server.close()
+            self.server = None
             raise RuntimeError("HDS TCP server did not expose a listening socket")
         self.port = int(sockets[0].getsockname()[1])
         _LOGGER.info("HDS server listening on %s:%d", self.host, self.port)
 
     async def stop(self) -> None:
-        for prepared in self.prepared:
-            if prepared.timeout:
-                prepared.timeout.cancel()
-        self.prepared.clear()
-        for connection in list(self.connections):
+        for prepared in list(self.prepared):
+            self._remove_prepared(prepared)
+        connections = list(self.connections)
+        for connection in connections:
             connection.close()
         if self.server:
             self.server.close()
             await self.server.wait_closed()
             self.server = None
+        if connections:
+            await asyncio.gather(*(connection.wait_closed() for connection in connections), return_exceptions=True)
+        self.connections.clear()
         self.port = None
 
     def prepare_session(
@@ -266,8 +307,17 @@ class HDSServer:
     ) -> PreparedSession:
         if self.port is None:
             raise RuntimeError("HDS server is not started")
+        if len(shared_secret) < 32:
+            raise ValueError("HDS shared secret is unexpectedly short")
         if len(controller_salt) != 32:
             raise ValueError("controller HDS salt must be 32 bytes")
+
+        for pending in list(self.prepared):
+            if pending.client_addr == client_addr:
+                self._remove_prepared(pending)
+        if len(self.prepared) >= MAX_PREPARED_SESSIONS:
+            raise RuntimeError("too many pending HDS sessions")
+
         accessory_salt = os.urandom(32)
         salt = controller_salt + accessory_salt
         session = PreparedSession(
@@ -277,24 +327,36 @@ class HDSServer:
             accessory_salt=accessory_salt,
         )
         loop = asyncio.get_running_loop()
-        session.timeout = loop.call_later(10.0, self._expire_prepared, session)
+        session.timeout = loop.call_later(PREPARED_SESSION_TIMEOUT, self._expire_prepared, session)
         self.prepared.append(session)
         return session
 
-    def _expire_prepared(self, session: PreparedSession) -> None:
+    def _remove_prepared(self, session: PreparedSession) -> None:
+        if session.timeout:
+            session.timeout.cancel()
+            session.timeout = None
         try:
             self.prepared.remove(session)
         except ValueError:
+            pass
+
+    def _expire_prepared(self, session: PreparedSession) -> None:
+        if session not in self.prepared:
             return
+        self._remove_prepared(session)
         _LOGGER.debug("Prepared HDS session expired for %s", session.client_addr)
 
     async def _accept(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
-            header = await asyncio.wait_for(reader.readexactly(4), 10.0)
-            if header[0] != 1:
-                raise ValueError("invalid initial HDS frame type")
-            length = int.from_bytes(header[1:4], "big")
-            encrypted = await reader.readexactly(length + 16)
+            async with asyncio.timeout(PREPARED_SESSION_TIMEOUT):
+                header = await reader.readexactly(4)
+                if header[0] != 1:
+                    raise ValueError("invalid initial HDS frame type")
+                length = int.from_bytes(header[1:4], "big")
+                if length > MAX_PAYLOAD_LENGTH:
+                    raise ValueError("initial HDS payload exceeds maximum size")
+                encrypted = await reader.readexactly(length + 16)
+
             found: PreparedSession | None = None
             first_payload: bytes | None = None
             for candidate in list(self.prepared):
@@ -308,10 +370,7 @@ class HDSServer:
                 break
             if not found or first_payload is None:
                 raise ValueError("could not identify HDS session")
-            self.prepared.remove(found)
-            if found.timeout:
-                found.timeout.cancel()
-                found.timeout = None
+            self._remove_prepared(found)
             connection = HDSConnection(
                 reader,
                 writer,
@@ -322,8 +381,15 @@ class HDSServer:
             )
             self.connections.add(connection)
             connection.start()
+        except (asyncio.TimeoutError, asyncio.IncompleteReadError, ValueError):
+            _LOGGER.debug("Rejected incoming HDS connection", exc_info=True)
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
         except Exception:
-            _LOGGER.exception("Rejected incoming HDS connection")
+            _LOGGER.exception("Failed while accepting HDS connection")
             writer.close()
             try:
                 await writer.wait_closed()
@@ -339,6 +405,8 @@ class HDSServer:
         request_id: int | None,
     ) -> None:
         if protocol == HDS_PROTOCOL_TARGET_CONTROL and topic == HDS_TOPIC_WHOAMI:
+            if "identifier" not in message:
+                raise ValueError("targetControl/whoami missing identifier")
             identifier = int(message["identifier"])
             connection.target_identifier = identifier
             if self.on_whoami:
@@ -350,10 +418,19 @@ class HDSServer:
                 await result
 
     def close_for_client(self, client_addr: tuple[str, int]) -> None:
-        """Close HDS sessions derived from a HAP session that has disconnected."""
+        """Close active and pending HDS sessions derived from a HAP session."""
+        for pending in list(self.prepared):
+            if pending.client_addr == client_addr:
+                self._remove_prepared(pending)
         for connection in list(self.connections):
             if connection.prepared.client_addr == client_addr:
                 connection.close()
+
+    def close_all(self) -> None:
+        for pending in list(self.prepared):
+            self._remove_prepared(pending)
+        for connection in list(self.connections):
+            connection.close()
 
     def _connection_closed(self, connection: HDSConnection) -> None:
         self.connections.discard(connection)
