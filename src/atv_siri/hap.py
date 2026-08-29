@@ -8,7 +8,6 @@ from pyhap.accessory import Accessory
 from pyhap.accessory_driver import AccessoryDriver
 from pyhap.characteristic import (
     Characteristic,
-    HAP_FORMAT_BOOL,
     HAP_FORMAT_STRING,
     HAP_FORMAT_TLV8,
     HAP_FORMAT_UINT8,
@@ -50,13 +49,20 @@ from .constants import (
     SERVICE_TARGET_CONTROL_MANAGEMENT,
 )
 
+ContextSetter = Callable[[Any, tuple[str, int] | None], Any]
+
 
 class ContextCharacteristic(Characteristic):
-    """Characteristic whose setter receives the originating HAP client address."""
+    """Characteristic whose setter receives the originating HAP client address.
+
+    HAP-python 5.0.0 does not expose connection context to ordinary characteristic
+    setters, so this deliberately subclasses its current Characteristic implementation.
+    The package pins the compatible HAP-python minor series for that reason.
+    """
 
     __slots__ = ("context_setter",)
 
-    def __init__(self, *args: Any, context_setter: Callable[[Any, tuple[str, int] | None], Any] | None = None, **kwargs: Any) -> None:
+    def __init__(self, *args: Any, context_setter: ContextSetter | None = None, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.context_setter = context_setter
 
@@ -68,12 +74,16 @@ class ContextCharacteristic(Characteristic):
             self.valid_value_or_raise(value)
         previous_value = self._value  # type: ignore[attr-defined]
         self.value = value
-        if self.context_setter:
-            response = self.context_setter(value, sender_client_addr)
-        elif self.setter_callback:
-            response = self.setter_callback(value)
-        else:
-            response = None
+        try:
+            if self.context_setter:
+                response = self.context_setter(value, sender_client_addr)
+            elif self.setter_callback:
+                response = self.setter_callback(value)
+            else:
+                response = None
+        except BaseException:
+            self.value = previous_value
+            raise
         if self._value != previous_value:  # type: ignore[attr-defined]
             self.notify(sender_client_addr)
         if self._always_null:  # type: ignore[attr-defined]
@@ -82,7 +92,7 @@ class ContextCharacteristic(Characteristic):
 
 
 class SiriHAPServerProtocol(HAPServerProtocol):
-    """HAP protocol that retains the Pair Verify shared secret for HDS."""
+    """HAP protocol retaining the Pair Verify shared secret required by HDS."""
 
     shared_secret: bytes | None = None
 
@@ -90,6 +100,12 @@ class SiriHAPServerProtocol(HAPServerProtocol):
         if response.shared_key:
             self.shared_secret = bytes(response.shared_key)
         super()._process_response(response)
+
+    def close(self) -> None:
+        try:
+            super().close()
+        finally:
+            self.shared_secret = None
 
 
 class SiriHAPServer(HAPServer):
@@ -104,11 +120,16 @@ class SiriHAPServer(HAPServer):
 
 
 class SiriAccessoryDriver(AccessoryDriver):
-    """HAP-python driver with HDS session context and connection-lost callback."""
+    """HAP-python driver exposing Pair Verify context to the HDS layer."""
 
-    def __init__(self, *args: Any, connection_lost_callback: Callable[[tuple[str, int]], None] | None = None, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *args: Any,
+        connection_lost_callback: Callable[[tuple[str, int]], None] | None = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(*args, **kwargs)
-        addr_port = self.http_server._addr_port  # HAP-python has no public accessor for this.
+        addr_port = self.http_server._addr_port
         self.http_server = SiriHAPServer(addr_port, self)
         self._external_connection_lost = connection_lost_callback
 
@@ -142,7 +163,7 @@ def _char(
     *,
     value: Any = None,
     getter: Callable[[], Any] | None = None,
-    setter: Callable[[Any, tuple[str, int] | None], Any] | None = None,
+    setter: ContextSetter | None = None,
     min_value: int | None = None,
     max_value: int | None = None,
     valid_values: list[int] | None = None,
@@ -179,7 +200,7 @@ class AppleTVRemoteAccessory(Accessory):
         self.set_info_service(
             manufacturer="atv-siri-py",
             model="Python Apple TV Siri Remote",
-            serial_number=controller.config.username.replace(":", ""),
+            serial_number=driver.state.mac.replace(":", ""),
             firmware_revision=controller.version,
         )
 
@@ -208,8 +229,9 @@ class AppleTVRemoteAccessory(Accessory):
             "ActiveIdentifier",
             CHAR_ACTIVE_IDENTIFIER,
             HAP_FORMAT_UINT32,
-            [HAP_PERMISSION_READ, HAP_PERMISSION_NOTIFY],
+            [HAP_PERMISSION_READ, HAP_PERMISSION_WRITE, HAP_PERMISSION_NOTIFY],
             getter=lambda: controller.active_identifier,
+            setter=controller.hap_active_identifier_write,
         )
         active = _char(
             "Active",
@@ -236,7 +258,16 @@ class AppleTVRemoteAccessory(Accessory):
         self.active_char = active
         self.button_event_char = button_event
 
-        siri_input = _char("SiriInputType", CHAR_SIRI_INPUT_TYPE, HAP_FORMAT_UINT8, [HAP_PERMISSION_READ], value=0, min_value=0, max_value=0, valid_values=[0])
+        siri_input = _char(
+            "SiriInputType",
+            CHAR_SIRI_INPUT_TYPE,
+            HAP_FORMAT_UINT8,
+            [HAP_PERMISSION_READ],
+            value=0,
+            min_value=0,
+            max_value=0,
+            valid_values=[0],
+        )
         self.siri_service = _service("Siri", SERVICE_SIRI, siri_input)
 
         supported_audio = _char(
@@ -254,7 +285,9 @@ class AppleTVRemoteAccessory(Accessory):
             getter=controller.selected_audio_value,
             setter=controller.hap_selected_audio_write,
         )
-        self.audio_service = _service("AudioStreamManagement", SERVICE_AUDIO_STREAM_MANAGEMENT, supported_audio, selected_audio)
+        self.audio_service = _service(
+            "AudioStreamManagement", SERVICE_AUDIO_STREAM_MANAGEMENT, supported_audio, selected_audio
+        )
 
         supported_hds = _char(
             "SupportedDataStreamTransportConfiguration",
@@ -273,7 +306,11 @@ class AppleTVRemoteAccessory(Accessory):
         )
         version = _char("Version", CHAR_VERSION, HAP_FORMAT_STRING, [HAP_PERMISSION_READ], value="1.0")
         self.hds_service = _service(
-            "DataStreamTransportManagement", SERVICE_DATA_STREAM_TRANSPORT_MANAGEMENT, supported_hds, setup_hds, version
+            "DataStreamTransportManagement",
+            SERVICE_DATA_STREAM_TRANSPORT_MANAGEMENT,
+            supported_hds,
+            setup_hds,
+            version,
         )
 
         self.add_service(
