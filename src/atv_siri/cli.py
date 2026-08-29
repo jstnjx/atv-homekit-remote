@@ -8,21 +8,57 @@ import os
 from .http_api import CompatibilityHTTPServer
 from .remote import AppleTVSiriRemote, RemoteConfig
 
+_LOGGER = logging.getLogger(__name__)
 
-def _env(name: str, default: str) -> str:
-    return os.environ.get(name, default)
+
+def _env(name: str, default: str | None = None) -> str | None:
+    value = os.environ.get(name)
+    return value if value not in {None, ""} else default
+
+
+def _env_int(name: str, default: int) -> int:
+    value = _env(name)
+    return int(value) if value is not None else default
+
+
+def _env_float(name: str, default: float) -> float:
+    value = _env(name)
+    return float(value) if value is not None else default
 
 
 def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="atv-siri", description="Pure-Python Apple TV HomeKit Siri remote")
     p.add_argument("--name", default=_env("HAP_NAME", "Voice Remote"))
-    p.add_argument("--username", default=_env("HAP_USERNAME", "1A:2B:3C:4D:5E:6F"))
-    p.add_argument("--pincode", default=_env("PINCODE", "031-45-154"))
-    p.add_argument("--hap-port", type=int, default=int(_env("HAP_PORT", "47129")))
-    p.add_argument("--hap-bind", default=os.environ.get("HAP_BIND"))
+    p.add_argument("--username", default=_env("HAP_USERNAME"), help="fixed HomeKit accessory id; generated if omitted")
+    p.add_argument(
+        "--pincode",
+        default=_env("HAP_PINCODE", _env("PINCODE")),
+        help="fixed HomeKit PIN; generated if omitted",
+    )
+    p.add_argument("--hap-port", type=int, default=_env_int("HAP_PORT", 47129))
+    p.add_argument("--hap-bind", default=_env("HAP_BIND"), help="local IP address for the HAP listener")
+    p.add_argument(
+        "--hap-advertise",
+        default=_env("HAP_ADVERTISED_ADDRESS"),
+        help="IP address advertised over mDNS",
+    )
+    p.add_argument("--hds-bind", default=_env("HDS_BIND", "0.0.0.0"), help="local IP address for HomeKit Data Stream")
     p.add_argument("--state-dir", default=_env("HAP_STORAGE", ".atv-siri-py"))
     p.add_argument("--ctrl-bind", default=_env("CTRL_BIND", "127.0.0.1"))
-    p.add_argument("--ctrl-port", type=int, default=int(_env("CTRL_PORT", "8477")))
+    p.add_argument("--ctrl-port", type=int, default=_env_int("CTRL_PORT", 8477))
+    p.add_argument(
+        "--ctrl-token",
+        default=_env("CTRL_TOKEN"),
+        help="bearer token; required for non-loopback control API",
+    )
+    p.add_argument(
+        "--allow-file-api",
+        action="store_true",
+        default=_env("ALLOW_FILE_API", "0") == "1",
+        help="enable /siri/file local-path endpoint (disabled by default)",
+    )
+    p.add_argument("--max-audio-bytes", type=int, default=_env_int("MAX_AUDIO_BYTES", 16 * 1024 * 1024))
+    p.add_argument("--utterance-timeout", type=float, default=_env_float("UTTERANCE_TIMEOUT", 60.0))
     p.add_argument("--no-http", action="store_true", help="disable compatibility HTTP control API")
     p.add_argument("-v", "--verbose", action="count", default=0)
     return p
@@ -39,16 +75,29 @@ async def _main(args: argparse.Namespace) -> None:
         pincode=args.pincode,
         port=args.hap_port,
         listen_address=args.hap_bind,
+        advertised_address=args.hap_advertise,
+        hds_listen_address=args.hds_bind,
         state_dir=args.state_dir,
     )
     remote = AppleTVSiriRemote(config)
-    api = None if args.no_http else CompatibilityHTTPServer(remote, host=args.ctrl_bind, port=args.ctrl_port)
-    await remote.start()
-    if api:
-        await api.start()
-        logging.getLogger(__name__).info("Control API listening on http://%s:%d", args.ctrl_bind, args.ctrl_port)
-    logging.getLogger(__name__).info("Pair '%s' in Apple Home with code %s", args.name, args.pincode)
+    api = None
+    if not args.no_http:
+        api = CompatibilityHTTPServer(
+            remote,
+            host=args.ctrl_bind,
+            port=args.ctrl_port,
+            token=args.ctrl_token,
+            allow_file_api=args.allow_file_api,
+            max_audio_bytes=args.max_audio_bytes,
+            utterance_timeout=args.utterance_timeout,
+        )
     try:
+        await remote.start()
+        if api:
+            await api.start()
+            auth = "Bearer authentication enabled" if args.ctrl_token else "loopback only"
+            _LOGGER.info("Control API listening on http://%s:%d (%s)", args.ctrl_bind, args.ctrl_port, auth)
+        _LOGGER.info("Pair %r in Apple Home with code %s", args.name, remote.pincode)
         await asyncio.Event().wait()
     finally:
         if api:
