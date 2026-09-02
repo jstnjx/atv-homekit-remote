@@ -1,6 +1,6 @@
 import math
 
-from atv_siri.hds_codec import Float32, Int64, decode, encode
+from atv_homekit_remote.hds_codec import Float32, Int64, decode, encode
 
 
 def test_hds_nested_roundtrip():

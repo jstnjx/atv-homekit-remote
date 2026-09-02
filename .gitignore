@@ -6,6 +6,6 @@ __pycache__/
 dist/
 build/
 *.egg-info/
-.atv-siri-py/
+.atv-homekit-remote/
 hap.state
 targets.json

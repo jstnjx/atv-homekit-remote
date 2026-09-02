@@ -1,14 +1,14 @@
 import base64
 import tempfile
 
-from atv_siri.constants import AUDIO_CODEC_OPUS, HDS_TRANSFER_TRANSPORT_CONFIGURATION
-from atv_siri.remote import AppleTVSiriRemote, RemoteConfig
-from atv_siri.tlv8 import decode
+from atv_homekit_remote.constants import AUDIO_CODEC_OPUS, HDS_TRANSFER_TRANSPORT_CONFIGURATION
+from atv_homekit_remote.remote import AppleTVHomeKitRemote, RemoteConfig
+from atv_homekit_remote.tlv8 import decode
 
 
 def make_remote():
     temp = tempfile.TemporaryDirectory()
-    remote = AppleTVSiriRemote(RemoteConfig(state_dir=temp.name))
+    remote = AppleTVHomeKitRemote(RemoteConfig(state_dir=temp.name))
     remote._test_temp_dir = temp
     return remote
 

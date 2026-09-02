@@ -1,10 +1,12 @@
 import asyncio
 
-from atv_siri import AppleTVSiriRemote, Button, RemoteConfig
+from atv_homekit_remote import AppleTVHomeKitRemote, Button, RemoteConfig
 
 
 async def main() -> None:
-    remote = AppleTVSiriRemote(RemoteConfig(name="Python Voice Remote", state_dir="./atv-siri-state"))
+    remote = AppleTVHomeKitRemote(
+        RemoteConfig(name="Apple TV HomeKit Remote", state_dir="./atv-homekit-remote-state")
+    )
     async with remote:
         print("Pair with Apple Home if needed. Current state:", remote.state)
         while not remote.siri_ready:

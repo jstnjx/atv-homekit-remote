@@ -53,7 +53,7 @@ jobs:
           python -m build
           python -m twine check dist/*
           python -m pip install dist/*.whl
-          python -c "from atv_siri import AppleTVSiriRemote, RemoteConfig; print(AppleTVSiriRemote, RemoteConfig)"
+          python -c "from atv_homekit_remote import AppleTVHomeKitRemote, RemoteConfig; print(AppleTVHomeKitRemote, RemoteConfig)"
       - uses: actions/upload-artifact@v4
         with:
           name: dist

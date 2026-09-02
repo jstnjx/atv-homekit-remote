@@ -1,4 +1,4 @@
-from atv_siri.audio import FRAME_BYTES, OpusEncoder
+from atv_homekit_remote.audio import FRAME_BYTES, OpusEncoder
 
 
 def test_opus_encoder_generates_frame():

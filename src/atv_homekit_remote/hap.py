@@ -198,8 +198,8 @@ class AppleTVRemoteAccessory(Accessory):
         super().__init__(driver, name, aid=1)
         self.controller = controller
         self.set_info_service(
-            manufacturer="atv-siri-py",
-            model="Python Apple TV Siri Remote",
+            manufacturer="atv-homekit-remote",
+            model="Apple TV HomeKit Remote",
             serial_number=driver.state.mac.replace(":", ""),
             firmware_revision=controller.version,
         )

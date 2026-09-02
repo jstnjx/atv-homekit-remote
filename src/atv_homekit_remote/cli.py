@@ -5,8 +5,8 @@ import asyncio
 import logging
 import os
 
-from .http_api import CompatibilityHTTPServer
-from .remote import AppleTVSiriRemote, RemoteConfig
+from .http_api import RemoteHTTPServer
+from .remote import AppleTVHomeKitRemote, RemoteConfig
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -27,8 +27,11 @@ def _env_float(name: str, default: float) -> float:
 
 
 def parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="atv-siri", description="Pure-Python Apple TV HomeKit Siri remote")
-    p.add_argument("--name", default=_env("HAP_NAME", "Voice Remote"))
+    p = argparse.ArgumentParser(
+        prog="atv-homekit-remote",
+        description="Pure-Python Apple TV HomeKit remote with Siri voice support",
+    )
+    p.add_argument("--name", default=_env("HAP_NAME", "Apple TV HomeKit Remote"))
     p.add_argument("--username", default=_env("HAP_USERNAME"), help="fixed HomeKit accessory id; generated if omitted")
     p.add_argument(
         "--pincode",
@@ -43,7 +46,7 @@ def parser() -> argparse.ArgumentParser:
         help="IP address advertised over mDNS",
     )
     p.add_argument("--hds-bind", default=_env("HDS_BIND", "0.0.0.0"), help="local IP address for HomeKit Data Stream")
-    p.add_argument("--state-dir", default=_env("HAP_STORAGE", ".atv-siri-py"))
+    p.add_argument("--state-dir", default=_env("HAP_STORAGE", ".atv-homekit-remote"))
     p.add_argument("--ctrl-bind", default=_env("CTRL_BIND", "127.0.0.1"))
     p.add_argument("--ctrl-port", type=int, default=_env_int("CTRL_PORT", 8477))
     p.add_argument(
@@ -59,7 +62,7 @@ def parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--max-audio-bytes", type=int, default=_env_int("MAX_AUDIO_BYTES", 16 * 1024 * 1024))
     p.add_argument("--utterance-timeout", type=float, default=_env_float("UTTERANCE_TIMEOUT", 60.0))
-    p.add_argument("--no-http", action="store_true", help="disable compatibility HTTP control API")
+    p.add_argument("--no-http", action="store_true", help="disable HTTP control API")
     p.add_argument("-v", "--verbose", action="count", default=0)
     return p
 
@@ -79,10 +82,10 @@ async def _main(args: argparse.Namespace) -> None:
         hds_listen_address=args.hds_bind,
         state_dir=args.state_dir,
     )
-    remote = AppleTVSiriRemote(config)
+    remote = AppleTVHomeKitRemote(config)
     api = None
     if not args.no_http:
-        api = CompatibilityHTTPServer(
+        api = RemoteHTTPServer(
             remote,
             host=args.ctrl_bind,
             port=args.ctrl_port,

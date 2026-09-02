@@ -30,21 +30,21 @@ _PIN_RE = re.compile(r"^\d{3}-\d{2}-\d{3}$")
 
 @dataclass(slots=True)
 class RemoteConfig:
-    """Runtime configuration for :class:`AppleTVSiriRemote`.
+    """Runtime configuration for :class:`AppleTVHomeKitRemote`.
 
     ``username`` and ``pincode`` deliberately default to ``None``. HAP-python will
     generate a unique HomeKit accessory identity and PIN and persist them in
-    ``state_dir``. Supplying explicit values is useful for controlled migrations.
+    ``state_dir``. Supplying explicit values is useful for controlled deployments.
     """
 
-    name: str = "Voice Remote"
+    name: str = "Apple TV HomeKit Remote"
     username: str | None = None
     pincode: str | None = None
     port: int = 47129
     listen_address: str | None = None
     advertised_address: str | None = None
     hds_listen_address: str = "0.0.0.0"
-    state_dir: str = ".atv-siri-py"
+    state_dir: str = ".atv-homekit-remote"
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -76,7 +76,7 @@ class TargetConfiguration:
     buttons: dict[int, ButtonConfiguration] = field(default_factory=dict)
 
 
-class AppleTVSiriRemote:
+class AppleTVHomeKitRemote:
     """Pure-Python HomeKit Target Controller with Apple TV Siri audio support."""
 
     version = __version__
@@ -165,7 +165,7 @@ class AppleTVSiriRemote:
             raise
         self._started = True
         _LOGGER.info(
-            "Apple TV Siri remote started as %s; HomeKit pairing code: %s",
+            "Apple TV HomeKit remote started as %s; HomeKit pairing code: %s",
             self.username,
             self.pincode,
         )
@@ -202,7 +202,7 @@ class AppleTVSiriRemote:
         self.hds_connections.clear()
         self.active_client = None
 
-    async def __aenter__(self) -> "AppleTVSiriRemote":
+    async def __aenter__(self) -> "AppleTVHomeKitRemote":
         await self.start()
         return self
 
@@ -666,11 +666,13 @@ class AppleTVSiriRemote:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
+
         async def _cancel() -> None:
             try:
                 await session.cancel()
             except BaseException:
                 _LOGGER.debug("Failed to cancel Siri session", exc_info=True)
+
         loop.create_task(_cancel(), name="cancel-active-siri")
 
     def _parse_target(self, raw: bytes | None) -> TargetConfiguration | None:

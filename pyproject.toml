@@ -38,7 +38,7 @@ Issues = "https://github.com/jstnjx/atv-homekit-remote/issues"
 Upstream = "https://github.com/marcusadolfsson/appletv-siri-voice"
 
 [project.scripts]
-atv-siri = "atv_siri.cli:main"
+atv-homekit-remote = "atv_homekit_remote.cli:main"
 
 [project.optional-dependencies]
 test = [
@@ -53,7 +53,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/atv_siri"]
+packages = ["src/atv_homekit_remote"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]

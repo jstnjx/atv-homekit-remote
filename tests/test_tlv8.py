@@ -1,6 +1,6 @@
 import base64
 
-from atv_siri.tlv8 import decode, encode, read_u16, read_u32, u16, u32
+from atv_homekit_remote.tlv8 import decode, encode, read_u16, read_u32, u16, u32
 
 
 def test_tlv_roundtrip_and_chunking():

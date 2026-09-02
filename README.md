@@ -14,7 +14,7 @@ This ports the core behavior of [`marcusadolfsson/appletv-siri-voice`](https://g
 - Siri `dataSend/open`, Opus audio packets, acknowledgements and close handling
 - 16 kHz / mono / signed PCM16 -> 20 ms Opus frames
 - Async Python API
-- Optional HTTP compatibility API matching the original bridge endpoints
+- Optional HTTP control API
 - Persistent HAP pairing and target state
 
 ## Requirements
@@ -32,7 +32,7 @@ This ports the core behavior of [`marcusadolfsson/appletv-siri-voice`](https://g
 python -m pip install -e .
 ```
 
-Or from Git once this repository is cloned:
+Or directly from Git:
 
 ```bash
 python -m pip install "git+https://github.com/jstnjx/atv-homekit-remote.git"
@@ -41,22 +41,20 @@ python -m pip install "git+https://github.com/jstnjx/atv-homekit-remote.git"
 ## Fastest way to run it
 
 ```bash
-atv-siri
+atv-homekit-remote
 ```
-
-Defaults intentionally match the original bridge:
 
 | Setting | Default | Environment variable |
 |---|---:|---|
-| HomeKit name | `Voice Remote` | `HAP_NAME` |
-| HomeKit username | `1A:2B:3C:4D:5E:6F` | `HAP_USERNAME` |
-| Pair code | `031-45-154` | `PINCODE` |
+| HomeKit name | `Apple TV HomeKit Remote` | `HAP_NAME` |
+| HomeKit username | generated and persisted | `HAP_USERNAME` |
+| Pair code | generated and persisted | `HAP_PINCODE` / `PINCODE` |
 | HAP port | `47129` | `HAP_PORT` |
 | Control API bind | `127.0.0.1` | `CTRL_BIND` |
 | Control API port | `8477` | `CTRL_PORT` |
-| Persistent state directory | `.atv-siri-py` | `HAP_STORAGE` |
+| Persistent state directory | `.atv-homekit-remote` | `HAP_STORAGE` |
 
-Then open **Apple Home -> Add Accessory -> More options**, select **Voice Remote**, and enter the setup code.
+Then open **Apple Home -> Add Accessory -> More options**, select **Apple TV HomeKit Remote**, and enter the displayed setup code.
 
 > Keep the state directory. It contains the HomeKit pairing keys and registered Target Control configuration.
 
@@ -67,14 +65,14 @@ Then open **Apple Home -> Add Accessory -> More options**, select **Voice Remote
 ```python
 import asyncio
 
-from atv_siri import AppleTVSiriRemote, RemoteConfig
+from atv_homekit_remote import AppleTVHomeKitRemote, RemoteConfig
 
 
 async def main():
-    remote = AppleTVSiriRemote(
+    remote = AppleTVHomeKitRemote(
         RemoteConfig(
-            name="Python Voice Remote",
-            state_dir="./atv-siri-state",
+            name="Apple TV HomeKit Remote",
+            state_dir="./atv-homekit-remote-state",
         )
     )
 
@@ -93,7 +91,7 @@ Constructing the object does not bind sockets. `await remote.start()` / `async w
 After the Apple TV has registered as a target and activated the Target Control service:
 
 ```python
-from atv_siri import Button
+from atv_homekit_remote import Button
 
 remote.set_active_identifier(207551296)
 await remote.press(Button.MENU)
@@ -154,7 +152,7 @@ Example shape:
 
 ```json
 {
-  "name": "Voice Remote",
+  "name": "Apple TV HomeKit Remote",
   "active_identifier": 207551296,
   "active": true,
   "configured_targets": [
@@ -172,9 +170,9 @@ Example shape:
 
 `siri_ready` requires all of the following: a selected target, the Apple TV having set Target Control `Active`, and a live HDS connection identified with `targetControl/whoami`.
 
-## Compatibility HTTP API
+## HTTP control API
 
-The `atv-siri` command starts a local compatibility API on `127.0.0.1:8477` unless `--no-http` is used.
+The `atv-homekit-remote` command starts a local control API on `127.0.0.1:8477` unless `--no-http` is used.
 
 | Endpoint | Purpose |
 |---|---|
@@ -192,7 +190,7 @@ curl -X POST --data-binary @utterance.pcm \
   "http://127.0.0.1:8477/siri/stream?target=207551296"
 ```
 
-The control API deliberately defaults to loopback. If you expose it with `CTRL_BIND=0.0.0.0`, protect it at the host firewall or reverse proxy; the compatibility API does not add its own authentication.
+The control API deliberately defaults to loopback. If you expose it with `CTRL_BIND=0.0.0.0`, protect it at the host firewall or reverse proxy; the API does not add its own authentication unless `CTRL_TOKEN` is configured.
 
 ## HDS implementation notes
 

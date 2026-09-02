@@ -1,4 +1,4 @@
-from atv_siri.hds import _hkdf, _nonce
+from atv_homekit_remote.hds import _hkdf, _nonce
 
 
 def test_hds_nonce_layout():

@@ -9,7 +9,7 @@ from typing import Any, AsyncIterator
 
 from aiohttp import web
 
-from .remote import AppleTVSiriRemote
+from .remote import AppleTVHomeKitRemote
 
 _DEFAULT_MAX_AUDIO_BYTES = 16 * 1024 * 1024
 
@@ -24,12 +24,12 @@ def _is_loopback_bind(host: str) -> bool:
         return False
 
 
-class CompatibilityHTTPServer:
-    """Optional control API compatible with the original bridge's core endpoints."""
+class RemoteHTTPServer:
+    """HTTP control API for Apple TV HomeKit Remote."""
 
     def __init__(
         self,
-        remote: AppleTVSiriRemote,
+        remote: AppleTVHomeKitRemote,
         *,
         host: str = "127.0.0.1",
         port: int = 8477,
