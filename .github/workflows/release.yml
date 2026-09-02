@@ -50,9 +50,17 @@ jobs:
         shell: bash
         run: |
           if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
+            if gh release view "$TAG" --json assets --jq '.assets[].name' | grep -q '^atv_homekit_remote-'; then
+              echo "exists=true" >> "$GITHUB_OUTPUT"
+              echo "replaced=false" >> "$GITHUB_OUTPUT"
+            else
+              gh release delete "$TAG" --cleanup-tag --yes
+              echo "exists=false" >> "$GITHUB_OUTPUT"
+              echo "replaced=true" >> "$GITHUB_OUTPUT"
+            fi
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "replaced=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build distribution
@@ -69,9 +77,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
           SHA: ${{ github.event.workflow_run.head_sha }}
+          REPLACED: ${{ steps.existing.outputs.replaced }}
         shell: bash
         run: |
-          gh release create "$TAG" dist/* \
-            --target "$SHA" \
-            --title "$TAG" \
-            --generate-notes
+          if [ "$REPLACED" = "true" ]; then
+            gh release create "$TAG" dist/* \
+              --target "$SHA" \
+              --title "$TAG" \
+              --notes "Initial release of atv-homekit-remote."
+          else
+            gh release create "$TAG" dist/* \
+              --target "$SHA" \
+              --title "$TAG" \
+              --generate-notes
+          fi
