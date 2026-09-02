@@ -1,4 +1,4 @@
-# atv-siri-py
+# atv-homekit-remote
 
 Pure-Python HomeKit **Target Controller** + **HomeKit Data Stream (HDS)** library for Apple TV remote buttons and Siri voice input.
 
@@ -35,7 +35,7 @@ python -m pip install -e .
 Or from Git once this repository is cloned:
 
 ```bash
-python -m pip install "git+https://github.com/jstnjx/atv-siri-py-.git"
+python -m pip install "git+https://github.com/jstnjx/atv-homekit-remote.git"
 ```
 
 ## Fastest way to run it
