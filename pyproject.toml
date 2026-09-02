@@ -3,7 +3,7 @@ requires = ["hatchling>=1.26,<2"]
 build-backend = "hatchling.build"
 
 [project]
-name = "atv-siri-py"
+name = "atv-homekit-remote"
 version = "0.1.0"
 description = "Pure-Python HomeKit Target Controller and Siri voice streaming library for Apple TV"
 readme = "README.md"
@@ -33,8 +33,8 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/jstnjx/atv-siri-py-"
-Issues = "https://github.com/jstnjx/atv-siri-py-/issues"
+Repository = "https://github.com/jstnjx/atv-homekit-remote"
+Issues = "https://github.com/jstnjx/atv-homekit-remote/issues"
 Upstream = "https://github.com/marcusadolfsson/appletv-siri-voice"
 
 [project.scripts]
@@ -46,7 +46,7 @@ test = [
   "pytest-asyncio>=0.24,<2",
 ]
 dev = [
-  "atv-siri-py[test]",
+  "atv-homekit-remote[test]",
   "build>=1.2,<2",
   "ruff>=0.12,<1",
   "twine>=6,<7",
