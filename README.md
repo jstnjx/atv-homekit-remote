@@ -28,14 +28,16 @@ This ports the core behavior of [`marcusadolfsson/appletv-siri-voice`](https://g
 
 ## Install
 
+`atv-homekit-remote` is published on PyPI:
+
 ```bash
-python -m pip install -e .
+python -m pip install atv-homekit-remote
 ```
 
-Or directly from Git:
+To pin the current release explicitly:
 
 ```bash
-python -m pip install "git+https://github.com/jstnjx/atv-homekit-remote.git"
+python -m pip install atv-homekit-remote==0.1.0
 ```
 
 ## Fastest way to run it
@@ -214,7 +216,9 @@ await remote.recover_hds()
 
 If an Apple TV remains stuck after that, restart the process while preserving the state directory. Pairing and target configuration are retained.
 
-## Tests
+## Development
+
+Install an editable checkout with the test dependencies:
 
 ```bash
 python -m pip install -e ".[test]"
@@ -222,6 +226,12 @@ pytest
 ```
 
 The automated tests cover TLV8, HDS serialization, framing crypto primitives, target/audio capability encoding, and Opus frame generation. A real Apple TV is still required for an end-to-end HomeKit pairing/HDS/Siri validation.
+
+## Releases
+
+Release artifacts are built and validated by GitHub Actions. PyPI publishing uses PyPI Trusted Publishing through GitHub Actions OIDC, so no long-lived PyPI API token is stored in the repository.
+
+The `Publish to PyPI` workflow can publish when a GitHub release is published or through manual workflow dispatch. Package versions are defined in `pyproject.toml`.
 
 ## License / attribution
 
